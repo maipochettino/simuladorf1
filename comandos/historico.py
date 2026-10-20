@@ -1,6 +1,6 @@
 """Comando /historico: resultados de campeonatos y carreras."""
 from datetime import datetime
-from comandos.common import ErrorUsuario, jolpica, coincide
+from comanodos.common import ErrorUsuario, jolpica, coincide
 
 def responder_historico(args):
     if not args:

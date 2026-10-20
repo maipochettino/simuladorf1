@@ -14,8 +14,7 @@ NOMBRE_MES = {v: k for k, v in reversed(list(MESES.items()))}
 def pilotos_por_mes():
     """
     Todos los pilotos de 2010 al presente agrupados por mes de nacimiento.
-    Se baja UNA vez (una consulta por temporada, con paginación implícita porque cada
-    temporada tiene menos de 100 pilotos) y queda en memoria.
+    Se baja UNA vez (una consulta por temporada) y queda en memoria.
     """
     global _pilotos_por_mes
     if _pilotos_por_mes is None:

@@ -1,13 +1,36 @@
-"""Comando /estrategia: análisis y simulación de neumáticos."""
+"""Comando /estrategia: análisis y simulación de neumáticos.
+
+Flujo con botones:
+    /estrategia                      -> botones de años
+    /estrategia 2024                 -> botones de carreras de 2024
+    /estrategia 2024 belgica         -> botones de pilotos de esa carrera
+    /estrategia 2024 belgica HAM     -> resultado directo
+
+Las funciones de menú devuelven (texto, filas) donde `filas` es una lista de filas
+y cada fila es una lista de tuplas (texto_boton, callback_data). `filas` es None
+cuando no hay que mostrar botones.
+"""
+from datetime import date
 import numpy as np
 import pandas as pd
 from itertools import permutations, product
 from comandos.common import (OPENF1, COMPUESTOS_SECOS, MIN_STINT, PIT_LOSS_DEFECTO, FUEL_DEFECTO, ErrorUsuario, get_json, norm, coincide, fmt_tiempo)
 
-def buscar_sesion(anio, consulta):
+PREFIJO = "est"          # prefijo de los callback_data de este comando
+PRIMER_ANIO = 2023       # OpenF1 tiene datos desde 2023
+
+# Búsquedas
+
+def carreras_del_anio(anio):
+    """Todas las carreras (session_name == Race) de un año, ordenadas por fecha."""
     sesiones = get_json(f"{OPENF1}/sessions", {"year": anio, "session_name": "Race"})
     if not sesiones:
-        raise ErrorUsuario(f"No encontré carreras de {anio} en OpenF1 (hay datos desde 2023).")
+        raise ErrorUsuario(f"No encontré carreras de {anio} en OpenF1 (hay datos desde {PRIMER_ANIO}).")
+    return sorted(sesiones, key=lambda s: s.get("date_start") or "")
+
+
+def buscar_sesion(anio, consulta):
+    sesiones = carreras_del_anio(anio)
 
     def texto(s):
         return f"{s.get('country_name','')} {s.get('location','')} {s.get('circuit_short_name','')}"
@@ -33,6 +56,62 @@ def buscar_piloto(pilotos, consulta):
     lista = ", ".join(sorted(f"{p.get('name_acronym')}" for p in pilotos))
     raise ErrorUsuario(f"No encontré al piloto '{consulta}'. Pilotos de esa carrera: {lista}")
 
+# Menús con botones
+
+def _en_filas(botones, por_fila):
+    """Parte una lista plana de botones en filas de `por_fila`."""
+    return [botones[i:i + por_fila] for i in range(0, len(botones), por_fila)]
+
+
+def menu_anios():
+    anios = list(range(PRIMER_ANIO, date.today().year + 1))
+    botones = [(str(a), f"{PREFIJO}:a:{a}") for a in anios]
+    return "📅 ¿De qué año querés ver la estrategia?", _en_filas(botones, 3)
+
+
+def menu_carreras(anio):
+    sesiones = carreras_del_anio(anio)
+    # Si un país tiene más de una carrera (EE. UU., Italia...), uso la ciudad para distinguir.
+    paises = [s.get("country_name") for s in sesiones]
+    botones = []
+    for s in sesiones:
+        pais = s.get("country_name") or "?"
+        nombre = s.get("location") or pais if paises.count(pais) > 1 else pais
+        botones.append((nombre, f"{PREFIJO}:c:{s['session_key']}"))
+    filas = _en_filas(botones, 2)
+    filas.append([("⬅️ Años", f"{PREFIJO}:y")])
+    return f"🏁 Elegí la carrera de {anio}:", filas
+
+
+def _sesion_por_key(session_key):
+    sesiones = get_json(f"{OPENF1}/sessions", {"session_key": session_key})
+    if not sesiones:
+        raise ErrorUsuario("No encontré esa carrera en OpenF1.")
+    return sesiones[0]
+
+
+def menu_pilotos(session_key, sesion=None):
+    sesion = sesion or _sesion_por_key(session_key)
+    pilotos = get_json(f"{OPENF1}/drivers", {"session_key": session_key})
+    if not pilotos:
+        raise ErrorUsuario("OpenF1 todavía no tiene pilotos para esa carrera.")
+
+    vistos, unicos = set(), []
+    for p in pilotos:
+        n = p.get("driver_number")
+        if n is None or n in vistos:
+            continue
+        vistos.add(n)
+        unicos.append(p)
+    unicos.sort(key=lambda p: p.get("name_acronym") or "")
+
+    botones = [(p.get("name_acronym") or str(p["driver_number"]),
+                f"{PREFIJO}:p:{session_key}:{p['driver_number']}") for p in unicos]
+    filas = _en_filas(botones, 4)
+    filas.append([("⬅️ Carreras", f"{PREFIJO}:a:{sesion.get('year')}")])
+    return f"🏎️ GP de {sesion.get('country_name')} {sesion.get('year')}: ¿de qué piloto?", filas
+
+# Modelo
 
 def armar_tabla(laps, stints):
     """Une cada vuelta con su stint (compuesto + edad del neumático)."""
@@ -79,8 +158,6 @@ def marcar_vueltas_neutralizadas(tabla):
 def ajustar_modelo(t):
     """
     Modelo:  tiempo_vuelta = ritmo_piloto + delta_compuesto + deg_compuesto * edad + fuel * nro_vuelta
-
-    Con esto se separan tres cosas que el notebook original mezclaba:
       - el ritmo propio de cada piloto (por eso el HARD ya no parece "más rápido" solo porque lo usaron los punteros)
       - el desgaste del neumático (pendiente, nunca negativa)
       - el combustible (el auto se aliviana, por eso las vueltas finales parecen "no degradar")
@@ -243,30 +320,19 @@ def estrategia_real(stints, piloto_num, total, m):
         return None
     return est
 
+# Cálculo completo (ya con sesión y piloto elegidos)
 
-def responder_estrategia(args):
-    if len(args) < 3:
-        return ("Uso: /estrategia <año> <carrera> <piloto>\n"
-                "Ejemplos:\n  /estrategia 2024 belgica HAM\n  /estrategia 2024 las vegas verstappen\n"
-                "El piloto va al final (sigla, apellido o número). Hay datos de 2023 en adelante.")
-    try:
-        anio = int(args[0])
-    except ValueError:
-        return "El primer dato tiene que ser el año, por ejemplo: /estrategia 2024 belgica HAM"
-    if anio < 2023:
-        return "Para estrategias solo hay datos desde 2023 (OpenF1). Para años anteriores probá /historico."
+def calcular_estrategia(session_key, piloto_ref, sesion=None):
+    """piloto_ref puede ser sigla, apellido o número (string o int)."""
+    sesion = sesion or _sesion_por_key(session_key)
+    anio = sesion.get("year")
 
-    piloto_q = args[-1]
-    carrera_q = " ".join(args[1:-1])
-
-    sesion = buscar_sesion(anio, carrera_q)
-    sk = sesion["session_key"]
-    pilotos = get_json(f"{OPENF1}/drivers", {"session_key": sk})
-    piloto = buscar_piloto(pilotos, piloto_q)
+    pilotos = get_json(f"{OPENF1}/drivers", {"session_key": session_key})
+    piloto = buscar_piloto(pilotos, str(piloto_ref))
     num = piloto["driver_number"]
 
-    laps = get_json(f"{OPENF1}/laps", {"session_key": sk})
-    stints = get_json(f"{OPENF1}/stints", {"session_key": sk})
+    laps = get_json(f"{OPENF1}/laps", {"session_key": session_key})
+    stints = get_json(f"{OPENF1}/stints", {"session_key": session_key})
     if not laps or not stints:
         raise ErrorUsuario("OpenF1 todavía no tiene vueltas/neumáticos de esa carrera.")
 
@@ -311,3 +377,48 @@ def responder_estrategia(args):
     lineas.append("⚠️ Modelo simplificado: no considera tráfico, Safety Car futuros ni clima.")
     return "\n".join(lineas)
 
+# Puntos de entrada para el bot
+
+def responder_estrategia(args):
+    """Entrada del comando /estrategia. Devuelve (texto, filas_de_botones | None)."""
+    if len(args) == 0:
+        return menu_anios()
+
+    try:
+        anio = int(args[0])
+    except ValueError:
+        return "El primer dato tiene que ser el año, por ejemplo: /estrategia 2024", None
+    if anio < PRIMER_ANIO:
+        return f"Para estrategias solo hay datos desde {PRIMER_ANIO} (OpenF1). Para años anteriores probá /historico.", None
+
+    if len(args) == 1:                      # solo el año -> botones de carreras
+        return menu_carreras(anio)
+
+    if len(args) == 2:                      # año + carrera -> botones de pilotos
+        sesion = buscar_sesion(anio, args[1])
+        return menu_pilotos(sesion["session_key"], sesion)
+
+    # año + carrera + piloto -> resultado directo (modo clásico)
+    piloto_q = args[-1]
+    carrera_q = " ".join(args[1:-1])
+    sesion = buscar_sesion(anio, carrera_q)
+    return calcular_estrategia(sesion["session_key"], piloto_q, sesion), None
+
+
+def manejar_callback(data):
+    """Entrada de los botones. `data` es el callback_data (ej. 'est:p:9558:44').
+    Devuelve (texto, filas_de_botones | None)."""
+    partes = data.split(":")
+    if partes[0] != PREFIJO or len(partes) < 2:
+        raise ErrorUsuario("Botón no reconocido.")
+    accion = partes[1]
+
+    if accion == "y":                                   # volver a los años
+        return menu_anios()
+    if accion == "a" and len(partes) == 3:              # año elegido -> carreras
+        return menu_carreras(int(partes[2]))
+    if accion == "c" and len(partes) == 3:              # carrera elegida -> pilotos
+        return menu_pilotos(int(partes[2]))
+    if accion == "p" and len(partes) == 4:              # piloto elegido -> resultado
+        return calcular_estrategia(int(partes[2]), partes[3]), None
+    raise ErrorUsuario("Botón no reconocido.")
