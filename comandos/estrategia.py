@@ -64,7 +64,7 @@ def _en_filas(botones, por_fila):
 
 
 def menu_anios():
-    anios = list(range(PRIMER_ANIO, date.today().year + 1))
+    anios = list(range(PRIMER_ANIO, date.today().year))
     botones = [(str(a), f"{PREFIJO}:a:{a}") for a in anios]
     return "📅 ¿De qué año querés ver la estrategia?", _en_filas(botones, 3)
 
