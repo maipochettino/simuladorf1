@@ -1,6 +1,5 @@
 """Comando /quepiloto: elige un piloto según el mes de nacimiento.
 
-    /quepiloto          -> botones con los 12 meses
     /quepiloto marzo    -> directo (también acepta el número: /quepiloto 3)
 """
 import time
@@ -8,6 +7,7 @@ import requests
 from datetime import datetime
 import random
 from comandos.common import ErrorUsuario, jolpica, norm
+import re
 
 PREFIJO = "qp"
 PRIMER_ANIO = 2010
@@ -101,10 +101,19 @@ def estadisticas_piloto(driver_id):
             "titulos": _titulos.get(driver_id, 0)}
 
 
-def menu_meses():
-    botones = [(NOMBRE_MES[m].capitalize(), f"{PREFIJO}:m:{m}") for m in range(1, 13)]
-    filas = [botones[i:i + 3] for i in range(0, 12, 3)]
-    return "🎂 ¿En qué mes naciste? Te digo qué piloto nació ese mes.", filas
+PREGUNTA_MES = "🎂 ¿En qué mes naciste? Escribilo con el nombre (marzo) o el número (3)."
+
+
+def interpretar_mes(texto):
+    """Devuelve el número de mes (1-12) o None. Acepta 'marzo', '3', 'nací en marzo', '15/03'."""
+    palabras = re.findall(r"[a-z0-9]+", norm(texto))
+    for pal in palabras:                      # primero busca el nombre del mes
+        if pal in MESES:
+            return MESES[pal]
+    for pal in palabras:                      # si no, un número del 1 al 12
+        if pal.isdigit() and 1 <= int(pal) <= 12:
+            return int(pal)
+    return None
 
 
 def piloto_del_mes(mes):
@@ -115,7 +124,7 @@ def piloto_del_mes(mes):
     p = random.choice(candidatos)
     est = estadisticas_piloto(p["driverId"])
     titulos = f"🏅 Campeonatos (desde {PRIMER_ANIO}): {est['titulos']}\n" if est["titulos"] else ""
-    texto = (
+    return (
         f"🏎️ TU PILOTO ES {p['givenName'].upper()} {p['familyName'].upper()}!\n\n"
         f"🌍 Nacionalidad: {p.get('nationality', '?')}\n"
         f"📅 Nació el: {p['dateOfBirth']}\n\n"
@@ -123,31 +132,14 @@ def piloto_del_mes(mes):
         f"🏆 Victorias: {est['victorias']}\n"
         f"🥇 Podios: {est['podios']}\n"
         f"⭐ Puntos (desde {PRIMER_ANIO}): {est['puntos']:.1f}\n"
-        f"{titulos}"
+        f"{titulos}\n"
+        f"🎲 Para ver otro piloto, escribí /quepiloto de nuevo."
     ).strip()
-    filas = [[("🎲 Otro piloto de este mes", f"{PREFIJO}:m:{mes}")],
-             [("⬅️ Cambiar de mes", f"{PREFIJO}:y")]]
-    return texto, filas
 
 
-def responder_quepiloto(args):
-    """Entrada de /quepiloto. Devuelve (texto, filas | None). args debe ser una lista."""
-    if not args:
-        return menu_meses()
-    txt = norm(args[0])
-    mes = int(txt) if txt.isdigit() else MESES.get(txt)
-    if not mes or not 1 <= mes <= 12:
-        return "No reconocí ese mes. Probá con el nombre (marzo) o el número (3).", None
+def responder_quepiloto(texto):
+    """Recibe el texto que escribió el usuario y devuelve el mensaje (string)."""
+    mes = interpretar_mes(texto)
+    if not mes:
+        raise ErrorUsuario("No reconocí ese mes. Probá con el nombre (marzo) o el número (3).")
     return piloto_del_mes(mes)
-
-
-def manejar_callback(data):
-    """Atiende los botones 'qp:...'. Devuelve (texto, filas | None)."""
-    p = data.split(":")
-    if p[0] != PREFIJO or len(p) < 2:
-        raise ErrorUsuario("Botón no reconocido.")
-    if p[1] == "y":
-        return menu_meses()
-    if p[1] == "m" and len(p) == 3:
-        return piloto_del_mes(int(p[2]))
-    raise ErrorUsuario("Botón no reconocido.")
