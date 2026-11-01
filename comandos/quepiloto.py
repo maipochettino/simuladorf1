@@ -8,6 +8,7 @@ from datetime import datetime
 import random
 from comandos.common import ErrorUsuario, jolpica, norm
 import re
+import html
 
 PREFIJO = "qp"
 PRIMER_ANIO = 2010
@@ -123,10 +124,12 @@ def piloto_del_mes(mes):
 
     p = random.choice(candidatos)
     est = estadisticas_piloto(p["driverId"])
+    nombre = html.escape(f"{p['givenName'].upper()} {p['familyName'].upper()}")
+    nacionalidad = html.escape(p.get("nationality", "?"))
     titulos = f"🏅 Campeonatos (desde {PRIMER_ANIO}): {est['titulos']}\n" if est["titulos"] else ""
     return (
-        f"🏎️ TU PILOTO ES {p['givenName'].upper()} {p['familyName'].upper()}!\n\n"
-        f"🌍 Nacionalidad: {p.get('nationality', '?')}\n"
+        f"🏎️ TU PILOTO ES <b>{nombre}</b>!\n\n"
+        f"🌍 Nacionalidad: {nacionalidad}\n"
         f"📅 Nació el: {p['dateOfBirth']}\n\n"
         f"🏁 Carreras: {est['carreras']}\n"
         f"🏆 Victorias: {est['victorias']}\n"
