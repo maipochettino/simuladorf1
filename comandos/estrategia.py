@@ -22,12 +22,15 @@ PRIMER_ANIO = 2023       # OpenF1 tiene datos desde 2023
 # Búsquedas
 
 def carreras_del_anio(anio):
-    """Todas las carreras (session_name == Race) de un año, ordenadas por fecha."""
+    """Carreras (session_name == Race) ya disputadas y no canceladas, ordenadas por fecha."""
     sesiones = get_json(f"{OPENF1}/sessions", {"year": anio, "session_name": "Race"})
+    hoy = date.today().isoformat()
+    sesiones = [s for s in sesiones
+                if not s.get("is_cancelled")
+                and (s.get("date_start") or "9999")[:10] <= hoy]
     if not sesiones:
-        raise ErrorUsuario(f"No encontré carreras de {anio} en OpenF1 (hay datos desde {PRIMER_ANIO}).")
+        raise ErrorUsuario(f"No encontré carreras disputadas de {anio} en OpenF1 (hay datos desde {PRIMER_ANIO}).")
     return sorted(sesiones, key=lambda s: s.get("date_start") or "")
-
 
 def buscar_sesion(anio, consulta):
     sesiones = carreras_del_anio(anio)
